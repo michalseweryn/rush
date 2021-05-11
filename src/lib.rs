@@ -21,6 +21,7 @@ mod extender;
 mod member;
 pub mod nodes;
 mod syncer;
+pub mod signed;
 mod terminal;
 mod testing;
 mod units;
