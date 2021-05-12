@@ -20,6 +20,7 @@ use std::{
     fmt::Debug,
 };
 use tokio::time;
+use std::marker::PhantomData;
 
 const FETCH_INTERVAL: time::Duration = time::Duration::from_secs(4);
 const TICK_INTERVAL: time::Duration = time::Duration::from_millis(100);
@@ -119,6 +120,7 @@ pub trait HashingT<H>: Fn(&[u8]) -> H + Copy + Send {}
 impl<T, H> HashingT<H> for T where T: Fn(&[u8]) -> H + Copy + Send {}
 
 pub struct Member<
+    'a,
     H: Hash,
     D: Data,
     Signature: Debug + Clone + Encode + Decode,
@@ -137,9 +139,10 @@ pub struct Member<
     requests: BinaryHeap<ScheduledTask<H>>,
     hashing: Hashing,
     threshold: NodeCount,
+    _phantom: PhantomData<&'a ()>,
 }
 
-impl<H, D, Signature, DP, KB, N, NI, Hashing> Member<H, D, Signature, DP, KB, N, NI, Hashing>
+impl<'a, H, D, Signature, DP, KB, N, NI, Hashing> Member<'a, H, D, Signature, DP, KB, N, NI, Hashing>
 where
     H: Hash + 'static,
     D: Data,
@@ -163,10 +166,11 @@ where
             requests: BinaryHeap::new(),
             hashing,
             threshold,
+            _phantom: PhantomData
         }
     }
 
-    fn send_consensus_notification(&mut self, notification: NotificationIn<H>) {
+    fn send_consensus_notification(&'a mut self, notification: NotificationIn<H>) {
         if let Err(e) = self
             .tx_consensus
             .as_ref()
@@ -177,7 +181,7 @@ where
         }
     }
 
-    fn on_create(&mut self, u: PreUnit<H>) {
+    fn on_create(&'a mut self, u: PreUnit<H>) {
         debug!(target: "rush-member", "On create notification.");
         let data = self.data_io.get_data();
         let full_unit = FullUnit {
@@ -200,7 +204,7 @@ where
 
     // Pulls tasks from the priority queue (sorted by scheduled time) and sends them to random peers
     // as long as they are scheduled at time <= curr_time
-    pub(crate) fn trigger_tasks(&mut self) {
+    pub(crate) fn trigger_tasks(&'a mut self) {
         while let Some(request) = self.requests.peek() {
             let curr_time = time::Instant::now();
             if request.scheduled_time > curr_time {
@@ -222,7 +226,7 @@ where
         }
     }
 
-    fn schedule_parents_request(&mut self, u_hash: H, curr_time: time::Instant) {
+    fn schedule_parents_request(&'a mut self, u_hash: H, curr_time: time::Instant) {
         if self.store.get_parents(u_hash).is_none() {
             let message = ConsensusMessage::<H, D, Signature>::RequestParents(u_hash);
             let command = NetworkCommand::SendToRandPeer(message.encode());
@@ -237,7 +241,7 @@ where
         }
     }
 
-    fn schedule_coord_request(&mut self, coord: UnitCoord, curr_time: time::Instant) {
+    fn schedule_coord_request(&'a mut self, coord: UnitCoord, curr_time: time::Instant) {
         debug!(target: "rush-member", "Starting request for {:?}", coord);
         // If we already have a unit with such a coord in our store then there is no need to request it.
         // It will be sent to consensus soon (or have already been sent).
@@ -256,7 +260,7 @@ where
     }
 
     fn schedule_unit_multicast(
-        &mut self,
+        &'a mut self,
         hash: H,
         interval: time::Duration,
         curr_time: time::Instant,
@@ -276,7 +280,7 @@ where
         ));
     }
 
-    pub(crate) fn on_missing_coords(&mut self, coords: Vec<UnitCoord>) {
+    pub(crate) fn on_missing_coords(&'a mut self, coords: Vec<UnitCoord>) {
         debug!(target: "rush-member", "Dealing with missing coords notification {:?}.", coords);
         let curr_time = time::Instant::now();
         for coord in coords {
@@ -288,7 +292,7 @@ where
         self.trigger_tasks();
     }
 
-    fn on_wrong_control_hash(&mut self, u_hash: H) {
+    fn on_wrong_control_hash(&'a mut self, u_hash: H) {
         debug!(target: "rush-member", "Dealing with wrong control hash notification {:?}.", u_hash);
         if let Some(p_hashes) = self.store.get_parents(u_hash) {
             // We have the parents by some strange reason (someone sent us parents
@@ -304,7 +308,7 @@ where
         }
     }
 
-    fn on_consensus_notification(&mut self, notification: NotificationOut<H>) {
+    fn on_consensus_notification(&'a mut self, notification: NotificationOut<H>) {
         match notification {
             NotificationOut::CreatedPreUnit(pu) => {
                 self.on_create(pu);
@@ -377,7 +381,7 @@ where
         true
     }
 
-    fn add_unit_to_store_unless_fork(&mut self, su: SignedUnit<H, D, Signature>) {
+    fn add_unit_to_store_unless_fork(&'a mut self, su: SignedUnit<H, D, Signature>) {
         if let Some(sv) = self.store.is_new_fork(&su) {
             let creator = su.creator();
             if !self.store.is_forker(creator) {
@@ -398,7 +402,7 @@ where
         }
     }
 
-    fn move_units_to_consensus(&mut self) {
+    fn move_units_to_consensus(&'a mut self) {
         let mut units = Vec::new();
         for su in self.store.yield_buffer_units() {
             let hash = su.hash(&self.hashing);
@@ -410,7 +414,7 @@ where
         }
     }
 
-    fn on_unit_received(&mut self, su: SignedUnit<H, D, Signature>, alert: bool) {
+    fn on_unit_received(&'a mut self, su: SignedUnit<H, D, Signature>, alert: bool) {
         if alert {
             // The unit has been validated already, we add to store.
             self.store.add_unit(su, true);
@@ -419,7 +423,7 @@ where
         }
     }
 
-    fn on_request_coord(&mut self, peer_id: Vec<u8>, coord: UnitCoord) {
+    fn on_request_coord(&'a mut self, peer_id: Vec<u8>, coord: UnitCoord) {
         debug!(target: "rush-member", "Received fetch request for coord {:?} from {:?}.", coord, peer_id);
         let maybe_su = (self.store.unit_by_coord(coord)).cloned();
 
@@ -433,13 +437,13 @@ where
         }
     }
 
-    fn send_network_command(&mut self, command: NetworkCommand) {
+    fn send_network_command(&'a mut self, command: NetworkCommand) {
         if let Err(e) = self.network.send(command) {
             debug!(target: "rush-member", "Failed to send network command {:?}.", e);
         }
     }
 
-    fn on_request_parents(&mut self, peer_id: Vec<u8>, u_hash: H) {
+    fn on_request_parents(&'a mut self, peer_id: Vec<u8>, u_hash: H) {
         debug!(target: "rush-member", "Received parents request for hash {:?} from {:?}.", u_hash, peer_id);
         let maybe_p_hashes = self.store.get_parents(u_hash);
 
@@ -458,7 +462,7 @@ where
         }
     }
 
-    fn on_parents_response(&mut self, u_hash: H, parents: Vec<SignedUnit<H, D, Signature>>) {
+    fn on_parents_response(&'a mut self, u_hash: H, parents: Vec<SignedUnit<H, D, Signature>>) {
         // TODO: we *must* make sure that we have indeed sent such a request before accepting the response.
         let (u_round, u_control_hash, parent_ids) = match self.store.unit_by_hash(&u_hash) {
             Some(u) => (
@@ -602,7 +606,7 @@ where
         }
     }
 
-    fn on_new_forker_detected(&mut self, forker: NodeIndex, proof: ForkProof<H, D, Signature>) {
+    fn on_new_forker_detected(&'a mut self, forker: NodeIndex, proof: ForkProof<H, D, Signature>) {
         let mut alerted_units = self.store.mark_forker(forker);
         if alerted_units.len() > MAX_UNITS_ALERT {
             // The ordering is increasing w.r.t. rounds.
@@ -616,7 +620,7 @@ where
         self.send_network_command(command);
     }
 
-    fn on_fork_alert(&mut self, alert: Alert<H, D, Signature>) {
+    fn on_fork_alert(&'a mut self, alert: Alert<H, D, Signature>) {
         if self.validate_alert(&alert) {
             let forker = alert.forker;
             if !self.store.is_forker(forker) {
@@ -635,7 +639,7 @@ where
     }
 
     fn on_consensus_message(
-        &mut self,
+        &'a mut self,
         message: ConsensusMessage<H, D, Signature>,
         peer_id: Vec<u8>,
     ) {
@@ -670,7 +674,7 @@ where
         }
     }
 
-    fn on_ordered_batch(&mut self, batch: Vec<H>) {
+    fn on_ordered_batch(&'a mut self, batch: Vec<H>) {
         let batch = batch
             .iter()
             .map(|h| {
@@ -687,7 +691,7 @@ where
         }
     }
 
-    fn on_network_event(&mut self, event: NetworkEvent) {
+    fn on_network_event(&'a mut self, event: NetworkEvent) {
         match event {
             NetworkEvent::MessageReceived(message, sender) => {
                 match ConsensusMessage::decode(&mut &message[..]) {
