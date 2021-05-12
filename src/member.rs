@@ -639,7 +639,7 @@ where
         self.send_network_command(command);
     }
 
-    fn on_fork_alert(&'a mut self, alert: Alert<H, D, Signature>) {
+    fn on_fork_alert(&mut self, alert: Alert<H, D, Signature>) {
         if self.validate_alert(&alert) {
             let forker = alert.forker;
             if !self.store.is_forker(forker) {
@@ -660,7 +660,7 @@ where
     }
 
     fn on_consensus_message(
-        &'a mut self,
+        &mut self,
         message: ConsensusMessage<H, D, Signature>,
         peer_id: Vec<u8>,
     ) {
@@ -719,7 +719,7 @@ where
         }
     }
 
-    fn on_network_event(&'a mut self, event: NetworkEvent) {
+    fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
             NetworkEvent::MessageReceived(message, sender) => {
                 match ConsensusMessage::decode(&mut &message[..]) {
@@ -735,7 +735,7 @@ where
     }
 
     pub async fn run_session(
-        mut self,
+        &mut self,
         spawn_handle: impl SpawnHandle,
         exit: oneshot::Receiver<()>,
     ) {
