@@ -3,36 +3,132 @@ use crate::{
     signed::{Signable, Signed, UncheckedSigned},
     Data, Hasher, Index, KeyBox, NodeCount, NodeIndex, NodeMap, Round, SessionId,
 };
-use codec::{Decode, Encode};
+use codec::{Decode, Encode, Input, Error, Output};
 use log::error;
 use std::{collections::HashMap, hash::Hash as StdHash};
 
 // TODO: need to make sure we never accept units of round > MAX_ROUND
 pub(crate) const MAX_ROUND: usize = 5000;
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Clone, Debug, Default, PartialEq, Encode, Decode)]
+pub(crate) struct PreUnit<H: Hasher> {
+    creator: NodeIndex,
+    round: u64, // u64 instead of `Round = usize` which does not implement Encode + Decode
+    control_hash: ControlHash<H>,
+}
+
+impl<H: Hasher> PreUnit<H> {
+    pub(crate) fn new_from_parents(
+        creator: NodeIndex,
+        round: Round,
+        parents: NodeMap<Option<H::Hash>>,
+    ) -> Self {
+        let control_hash = ControlHash::new(&parents);
+        PreUnit {
+            creator,
+            round: round as u64,
+            control_hash,
+        }
+    }
+
+    pub(crate) fn n_parents(&self) -> NodeCount {
+        self.control_hash.n_parents()
+    }
+
+    pub(crate) fn n_members(&self) -> NodeCount {
+        self.control_hash.n_members()
+    }
+
+    pub(crate) fn creator(&self) -> NodeIndex {
+        self.creator
+    }
+    pub(crate) fn round(&self) -> Round {
+        self.round as Round
+    }
+    pub(crate) fn control_hash(&self) -> &ControlHash<H> {
+        &self.control_hash
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Encode, Decode)]
+pub(crate) struct Unit<H: Hasher> {
+    pub(crate) pre_unit: PreUnit<H>,
+    pub(crate) hash: H::Hash,
+}
+
+impl<H: Hasher> Unit<H> {
+    pub(crate) fn creator(&self) -> NodeIndex {
+        self.pre_unit.creator()
+    }
+    pub(crate) fn round(&self) -> Round {
+        self.pre_unit.round()
+    }
+    pub(crate) fn control_hash(&self) -> &ControlHash<H> {
+        self.pre_unit.control_hash()
+    }
+    pub(crate) fn hash(&self) -> H::Hash {
+        self.hash
+    }
+}
+
+
+#[derive(Debug, Default, Clone)]
 pub(crate) struct FullUnit<H: Hasher, D: Data> {
-    pub(crate) inner: PreUnit<H>,
+    pub(crate) unit: Unit<H>,
     pub(crate) data: D,
     pub(crate) session_id: SessionId,
 }
 
 impl<H: Hasher, D: Data> FullUnit<H, D> {
+    pub(crate) fn new(pre_unit: PreUnit<H>, data: D, session_id: SessionId) -> Self {
+        let mut full_unit = FullUnit {
+            unit: Unit {
+                pre_unit,
+                hash: H::hash(&[]),
+            },
+            data,
+            session_id
+        };
+        let hash = full_unit.using_encoded(H::hash);
+        full_unit.unit.hash = hash;
+        full_unit
+    }
     pub(crate) fn creator(&self) -> NodeIndex {
-        self.inner.creator
+        self.unit.creator()
     }
     pub(crate) fn round(&self) -> Round {
-        self.inner.round()
+        self.unit.round()
     }
-
+    pub(crate) fn _control_hash(&self) -> &ControlHash<H> {
+        &self.unit.control_hash()
+    }
     pub(crate) fn coord(&self) -> UnitCoord {
         (self.round(), self.creator()).into()
     }
-
     pub(crate) fn hash(&self) -> H::Hash {
-        H::hash(&self.encode())
+        self.unit.hash
     }
 }
+
+
+// A custom Encode + Decode implementation is needed, without the hash in the encoding.
+impl<H: Hasher, D: Data> Encode for FullUnit<H, D> {
+    fn encode_to<T: Output + ?Sized>(&self, dest: &mut T) {
+        self.unit.pre_unit.encode_to(dest);
+        self.data.encode_to(dest);
+        self.session_id.encode_to(dest)
+    }
+}
+
+impl<H: Hasher, D: Data> Decode for FullUnit<H, D> {
+    fn decode<I: Input>(input: &mut I) -> Result<Self, Error> {
+        let pre_unit = PreUnit::decode(input)?;
+        let data = D::decode(input)?;
+        let session_id = SessionId::decode(input)?;
+        Ok(FullUnit::new(pre_unit, data, session_id))
+    }
+}
+
 
 impl<H: Hasher, D: Data> Signable for FullUnit<H, D> {
     type Hash = H::Hash;
@@ -43,7 +139,7 @@ impl<H: Hasher, D: Data> Signable for FullUnit<H, D> {
 
 impl<H: Hasher, D: Data> Index for FullUnit<H, D> {
     fn index(&self) -> NodeIndex {
-        self.inner.creator
+        self.creator()
     }
 }
 
@@ -84,81 +180,14 @@ impl From<(usize, NodeIndex)> for UnitCoord {
     }
 }
 
-type UnitRound = u64;
-
-#[derive(Clone, Debug, PartialEq, Encode, Decode)]
-pub(crate) struct PreUnit<H: Hasher> {
-    pub(crate) creator: NodeIndex,
-    pub(crate) round: UnitRound,
-    pub(crate) control_hash: ControlHash<H>,
-}
-
-impl<H: Hasher> PreUnit<H> {
-    pub(crate) fn creator(&self) -> NodeIndex {
-        self.creator
-    }
-
-    pub(crate) fn round(&self) -> Round {
-        self.round as Round
-    }
-
-    pub(crate) fn new_from_parents(
-        creator: NodeIndex,
-        round: Round,
-        parents: NodeMap<Option<H::Hash>>,
-    ) -> Self {
-        let control_hash = ControlHash::new(&parents);
-        PreUnit {
-            creator,
-            round: round as u64,
-            control_hash,
-        }
-    }
-
-    pub(crate) fn n_parents(&self) -> NodeCount {
-        self.control_hash.n_parents()
-    }
-
-    pub(crate) fn n_members(&self) -> NodeCount {
-        self.control_hash.n_members()
-    }
-}
-
 impl<H: Hasher> From<PreUnit<H>> for NotificationOut<H> {
     fn from(pu: PreUnit<H>) -> Self {
         NotificationOut::CreatedPreUnit(pu)
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Encode, Decode)]
-pub(crate) struct Unit<H: Hasher> {
-    pub(crate) creator: NodeIndex,
-    round: UnitRound,
-    pub(crate) hash: H::Hash,
-    pub(crate) control_hash: ControlHash<H>,
-}
 
-impl<H: Hasher> Unit<H> {
-    pub(crate) fn hash(&self) -> H::Hash {
-        self.hash
-    }
 
-    pub(crate) fn creator(&self) -> NodeIndex {
-        self.creator
-    }
-    pub(crate) fn round(&self) -> Round {
-        self.round as Round
-    }
-
-    pub(crate) fn new_from_preunit(pu: PreUnit<H>, hash: H::Hash) -> Self {
-        Unit {
-            creator: pu.creator,
-            round: pu.round,
-            hash,
-            control_hash: pu.control_hash,
-        }
-    }
-}
 #[derive(Clone, Debug, Default, PartialEq, Encode, Decode)]
 pub(crate) struct ControlHash<H: Hasher> {
     // TODO we need to optimize it for it to take O(N) bits of memory not O(N) words.

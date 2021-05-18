@@ -166,11 +166,10 @@ where
     fn on_create(&mut self, u: PreUnit<H>) {
         debug!(target: "rush-member", "On create notification.");
         let data = self.data_io.get_data();
-        let full_unit = FullUnit {
-            inner: u,
+        let full_unit = FullUnit::new(u,
             data,
-            session_id: self.config.session_id,
-        };
+            self.config.session_id,
+        );
         let hash = full_unit.hash();
         // TODO: beware: sign_unit blocks and is quite slow!
         let signed_unit = Signed::sign(self.keybox, full_unit);
@@ -312,7 +311,7 @@ where
     fn validate_unit_parents(&self, su: &SignedUnit<'a, H, D, KB>) -> bool {
         // NOTE: at this point we cannot validate correctness of the control hash, in principle it could be
         // just a random hash, but we still would not be able to deduce that by looking at the unit only.
-        let pre_unit = &su.as_signable().inner;
+        let pre_unit = &su.as_signable().unit.pre_unit;
         if pre_unit.n_members() != self.config.n_members {
             debug!(target: "rush-member", "Unit with wrong length of parents map.");
             return false;
@@ -391,8 +390,7 @@ where
         let mut units = Vec::new();
         for su in self.store.yield_buffer_units() {
             let full_unit = su.as_signable();
-            let hash = full_unit.hash();
-            let unit = Unit::new_from_preunit(full_unit.inner.clone(), hash);
+            let unit = full_unit.unit.clone();
             units.push(unit);
         }
         if !units.is_empty() {
@@ -455,9 +453,10 @@ where
                 let full_unit = su.as_signable();
                 (
                     full_unit.round(),
-                    full_unit.inner.control_hash.hash,
+                    full_unit.unit.pre_unit.control_hash.hash,
                     full_unit
-                        .inner
+                        .unit
+                        .pre_unit
                         .control_hash
                         .parents
                         .enumerate()

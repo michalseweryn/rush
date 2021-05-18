@@ -43,7 +43,7 @@ pub struct TerminalUnit<H: Hasher> {
 
 impl<H: Hasher> From<TerminalUnit<H>> for ExtenderUnit<H> {
     fn from(u: TerminalUnit<H>) -> ExtenderUnit<H> {
-        ExtenderUnit::new(u.unit.creator, u.unit.round(), u.unit.hash, u.parents)
+        ExtenderUnit::new(u.unit.creator(), u.unit.round(), u.unit.hash, u.parents)
     }
 }
 
@@ -56,8 +56,8 @@ impl<H: Hasher> From<TerminalUnit<H>> for Unit<H> {
 impl<H: Hasher> TerminalUnit<H> {
     // creates a unit from a Control Hash Unit, that has no parents reconstructed yet
     pub(crate) fn blank_from_unit(unit: &Unit<H>) -> Self {
-        let n_members = unit.control_hash.n_members();
-        let n_parents = unit.control_hash.n_parents();
+        let n_members = unit.control_hash().n_members();
+        let n_parents = unit.control_hash().n_parents();
         TerminalUnit {
             unit: unit.clone(),
             parents: NodeMap::new_with_len(n_members),
@@ -78,7 +78,7 @@ impl<H: Hasher> TerminalUnit<H> {
     pub(crate) fn verify_control_hash(&self) -> bool {
         // this will be called only after all parents have been reconstructed
 
-        self.unit.control_hash.hash == ControlHash::<H>::combine_hashes(&self.parents)
+        self.unit.control_hash().hash == ControlHash::<H>::combine_hashes(&self.parents)
     }
 }
 
@@ -207,7 +207,7 @@ impl<H: Hasher> Terminal<H> {
 
     fn update_on_store_add(&mut self, u: Unit<H>) {
         let u_hash = u.hash;
-        let (u_round, pid) = (u.round(), u.creator);
+        let (u_round, pid) = (u.round(), u.creator());
         // If u is a fork, then the below line will overwrite the previous unit at this coord, but this is intended
         // and does not break correctness.
         self.unit_by_coord.insert((u_round, pid), u_hash);
@@ -222,7 +222,7 @@ impl<H: Hasher> Terminal<H> {
                 .push_back(TerminalEvent::ParentsReconstructed(u_hash));
         } else {
             let mut coords_to_request = Vec::new();
-            for (i, b) in u.control_hash.parents.enumerate() {
+            for (i, b) in u.control_hash().parents.enumerate() {
                 if *b {
                     let coord = (u_round - 1, i);
                     let maybe_hash = self.unit_by_coord.get(&coord).cloned();
@@ -236,7 +236,7 @@ impl<H: Hasher> Terminal<H> {
                 }
             }
             if !coords_to_request.is_empty() {
-                let aux_data = RequestAuxData::new(u.creator);
+                let aux_data = RequestAuxData::new(u.creator());
                 debug!(target: "rush-terminal", "{} Missing coords {:?} aux {:?}", self.node_id, coords_to_request, aux_data);
                 let send_result = self
                     .ntfct_tx
@@ -280,7 +280,7 @@ impl<H: Hasher> Terminal<H> {
             .get_mut(&u_hash)
             .expect("unit with wrong control hash must be in store");
         let mut counter = 0;
-        for (i, b) in u.unit.control_hash.parents.enumerate() {
+        for (i, b) in u.unit.control_hash().parents.enumerate() {
             if *b {
                 u.parents[i] = Some(p_hashes[counter]);
                 counter += 1;
@@ -291,7 +291,7 @@ impl<H: Hasher> Terminal<H> {
     }
 
     fn add_to_store(&mut self, u: Unit<H>) {
-        debug!(target: "rush-terminal", "{} Adding to store {:?} round {:?} index {:?}", self.node_id, u.hash(), u.round(), u.creator);
+        debug!(target: "rush-terminal", "{} Adding to store {:?} round {:?} index {:?}", self.node_id, u.hash(), u.round(), u.creator());
         if let Entry::Vacant(entry) = self.unit_store.entry(u.hash()) {
             entry.insert(TerminalUnit::<H>::blank_from_unit(&u));
             self.update_on_store_add(u);
@@ -353,7 +353,7 @@ impl<H: Hasher> Terminal<H> {
                 TerminalEvent::ParentsInDag(u_hash) => {
                     let u = self.unit_store.get_mut(&u_hash).unwrap();
                     u.status = UnitStatus::InDag;
-                    debug!(target: "rush-terminal", "{} Adding to Dag {:?} round {:?} index {}.", self.node_id, u_hash, u.unit.round(), u.unit.creator);
+                    debug!(target: "rush-terminal", "{} Adding to Dag {:?} round {:?} index {}.", self.node_id, u_hash, u.unit.round(), u.unit.creator());
                     self.update_on_dag_add(&u_hash);
                 }
             }
