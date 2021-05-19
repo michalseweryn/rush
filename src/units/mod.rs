@@ -164,7 +164,7 @@ impl<H: Hasher, D: Data> FullUnit<H, D> {
         self.pre_unit.coord
     }
     pub(crate) fn data(&self) -> D {
-        self.data.clone()
+        self.data
     }
     pub(crate) fn session_id(&self) -> SessionId {
         self.session_id
@@ -223,11 +223,13 @@ pub(crate) use store::*;
 
 #[cfg(test)]
 mod tests {
-    use crate::units::{FullUnit, PreUnit, ControlHash};
-    use crate::nodes::{NodeIndex};
+    use crate::{
+        nodes::NodeIndex,
+        testing::mock::Hasher64,
+        units::{ControlHash, FullUnit, PreUnit},
+        Hasher,
+    };
     use codec::Encode;
-    use crate::testing::mock::Hasher64;
-    use crate::Hasher;
 
     /// unsure that
     #[test]
