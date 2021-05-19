@@ -143,7 +143,7 @@ impl<H: Hasher, D: Data> FullUnit<H, D> {
             pre_unit,
             data,
             session_id,
-            hash: H::hash(&[]),
+            hash: Default::default(),
         };
         full_unit.hash = full_unit.using_encoded(H::hash);
         full_unit
@@ -220,3 +220,22 @@ impl<H: Hasher> Unit<H> {
 
 mod store;
 pub(crate) use store::*;
+
+#[cfg(test)]
+mod tests {
+    use crate::units::{FullUnit, PreUnit, ControlHash};
+    use crate::nodes::{NodeIndex};
+    use codec::Encode;
+    use crate::testing::mock::Hasher64;
+    use crate::Hasher;
+
+    /// unsure that
+    #[test]
+    fn test_full_unit_hash() {
+        let ch = ControlHash::<Hasher64>::new(&vec![].into());
+        let pre_unit = PreUnit::new(NodeIndex(5), 6, ch);
+        let full_unit = FullUnit::new(pre_unit, 7, 8);
+        let hash = full_unit.using_encoded(Hasher64::hash);
+        assert_eq!(full_unit.hash, hash);
+    }
+}
