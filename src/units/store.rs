@@ -1,220 +1,7 @@
-use crate::{
-    member::NotificationOut,
-    signed::{Signable, Signed, UncheckedSigned},
-    Data, Hasher, Index, KeyBox, NodeCount, NodeIndex, NodeMap, Round, SessionId,
-};
-use codec::{Decode, Encode, Input, Error, Output};
-use log::error;
-use std::{collections::HashMap, hash::Hash as StdHash};
+use super::*;
 
 // TODO: need to make sure we never accept units of round > MAX_ROUND
 pub(crate) const MAX_ROUND: usize = 5000;
-
-#[derive(Clone, Debug, Default, PartialEq, Encode, Decode)]
-pub(crate) struct PreUnit<H: Hasher> {
-    creator: NodeIndex,
-    round: u64, // u64 instead of `Round = usize` which does not implement Encode + Decode
-    control_hash: ControlHash<H>,
-}
-
-impl<H: Hasher> PreUnit<H> {
-    pub(crate) fn new_from_parents(
-        creator: NodeIndex,
-        round: Round,
-        parents: NodeMap<Option<H::Hash>>,
-    ) -> Self {
-        let control_hash = ControlHash::new(&parents);
-        PreUnit {
-            creator,
-            round: round as u64,
-            control_hash,
-        }
-    }
-
-    pub(crate) fn n_parents(&self) -> NodeCount {
-        self.control_hash.n_parents()
-    }
-
-    pub(crate) fn n_members(&self) -> NodeCount {
-        self.control_hash.n_members()
-    }
-
-    pub(crate) fn creator(&self) -> NodeIndex {
-        self.creator
-    }
-    pub(crate) fn round(&self) -> Round {
-        self.round as Round
-    }
-    pub(crate) fn control_hash(&self) -> &ControlHash<H> {
-        &self.control_hash
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Encode, Decode)]
-pub(crate) struct Unit<H: Hasher> {
-    pub(crate) pre_unit: PreUnit<H>,
-    pub(crate) hash: H::Hash,
-}
-
-impl<H: Hasher> Unit<H> {
-    pub(crate) fn creator(&self) -> NodeIndex {
-        self.pre_unit.creator()
-    }
-    pub(crate) fn round(&self) -> Round {
-        self.pre_unit.round()
-    }
-    pub(crate) fn control_hash(&self) -> &ControlHash<H> {
-        self.pre_unit.control_hash()
-    }
-    pub(crate) fn hash(&self) -> H::Hash {
-        self.hash
-    }
-}
-
-
-#[derive(Debug, Default, Clone)]
-pub(crate) struct FullUnit<H: Hasher, D: Data> {
-    pub(crate) unit: Unit<H>,
-    pub(crate) data: D,
-    pub(crate) session_id: SessionId,
-}
-
-impl<H: Hasher, D: Data> FullUnit<H, D> {
-    pub(crate) fn new(pre_unit: PreUnit<H>, data: D, session_id: SessionId) -> Self {
-        let mut full_unit = FullUnit {
-            unit: Unit {
-                pre_unit,
-                hash: H::hash(&[]),
-            },
-            data,
-            session_id
-        };
-        let hash = full_unit.using_encoded(H::hash);
-        full_unit.unit.hash = hash;
-        full_unit
-    }
-    pub(crate) fn creator(&self) -> NodeIndex {
-        self.unit.creator()
-    }
-    pub(crate) fn round(&self) -> Round {
-        self.unit.round()
-    }
-    pub(crate) fn _control_hash(&self) -> &ControlHash<H> {
-        &self.unit.control_hash()
-    }
-    pub(crate) fn coord(&self) -> UnitCoord {
-        (self.round(), self.creator()).into()
-    }
-    pub(crate) fn hash(&self) -> H::Hash {
-        self.unit.hash
-    }
-}
-
-
-// A custom Encode + Decode implementation is needed, without the hash in the encoding.
-impl<H: Hasher, D: Data> Encode for FullUnit<H, D> {
-    fn encode_to<T: Output + ?Sized>(&self, dest: &mut T) {
-        self.unit.pre_unit.encode_to(dest);
-        self.data.encode_to(dest);
-        self.session_id.encode_to(dest)
-    }
-}
-
-impl<H: Hasher, D: Data> Decode for FullUnit<H, D> {
-    fn decode<I: Input>(input: &mut I) -> Result<Self, Error> {
-        let pre_unit = PreUnit::decode(input)?;
-        let data = D::decode(input)?;
-        let session_id = SessionId::decode(input)?;
-        Ok(FullUnit::new(pre_unit, data, session_id))
-    }
-}
-
-
-impl<H: Hasher, D: Data> Signable for FullUnit<H, D> {
-    type Hash = H::Hash;
-    fn hash(&self) -> H::Hash {
-        self.using_encoded(H::hash)
-    }
-}
-
-impl<H: Hasher, D: Data> Index for FullUnit<H, D> {
-    fn index(&self) -> NodeIndex {
-        self.creator()
-    }
-}
-
-pub(crate) type UncheckedSignedUnit<H, D, S> = UncheckedSigned<FullUnit<H, D>, S>;
-
-pub(crate) type SignedUnit<'a, H, D, KB> = Signed<'a, FullUnit<H, D>, KB>;
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Encode, Decode, StdHash)]
-pub(crate) struct UnitCoord {
-    pub(crate) creator: NodeIndex,
-    pub(crate) round: u64,
-}
-
-impl<H: Hasher> From<Unit<H>> for UnitCoord {
-    fn from(unit: Unit<H>) -> Self {
-        UnitCoord {
-            creator: unit.creator(),
-            round: unit.round() as u64,
-        }
-    }
-}
-
-impl<H: Hasher> From<&Unit<H>> for UnitCoord {
-    fn from(unit: &Unit<H>) -> Self {
-        UnitCoord {
-            creator: unit.creator(),
-            round: unit.round() as u64,
-        }
-    }
-}
-
-impl From<(usize, NodeIndex)> for UnitCoord {
-    fn from(coord: (usize, NodeIndex)) -> Self {
-        UnitCoord {
-            creator: coord.1,
-            round: coord.0 as u64,
-        }
-    }
-}
-
-impl<H: Hasher> From<PreUnit<H>> for NotificationOut<H> {
-    fn from(pu: PreUnit<H>) -> Self {
-        NotificationOut::CreatedPreUnit(pu)
-    }
-}
-
-
-
-#[derive(Clone, Debug, Default, PartialEq, Encode, Decode)]
-pub(crate) struct ControlHash<H: Hasher> {
-    // TODO we need to optimize it for it to take O(N) bits of memory not O(N) words.
-    pub(crate) parents: NodeMap<bool>,
-    pub(crate) hash: H::Hash,
-}
-
-impl<H: Hasher> ControlHash<H> {
-    fn new(parent_map: &NodeMap<Option<H::Hash>>) -> Self {
-        let hash = Self::combine_hashes(&parent_map);
-        let parents = parent_map.iter().map(|h| h.is_some()).collect();
-
-        ControlHash { parents, hash }
-    }
-
-    pub(crate) fn combine_hashes(parent_map: &NodeMap<Option<H::Hash>>) -> H::Hash {
-        parent_map.using_encoded(H::hash)
-    }
-
-    pub(crate) fn n_parents(&self) -> NodeCount {
-        NodeCount(self.parents.iter().filter(|&b| *b).count())
-    }
-
-    pub(crate) fn n_members(&self) -> NodeCount {
-        NodeCount(self.parents.len())
-    }
-}
 
 pub(crate) struct UnitStore<'a, H: Hasher, D: Data, KB: KeyBox> {
     by_coord: HashMap<UnitCoord, SignedUnit<'a, H, D, KB>>,
@@ -274,7 +61,7 @@ impl<'a, H: Hasher, D: Data, KB: KeyBox> UnitStore<'a, H, D, KB> {
             for round in (old_round + 1)..(self.round_in_progress + 1) {
                 for (id, forker) in self.is_forker.enumerate() {
                     if !*forker {
-                        let coord = (round, id).into();
+                        let coord = UnitCoord::new(round, id);
                         if let Some(su) = self.unit_by_coord(coord).cloned() {
                             self.legit_buffer.push(su);
                         }
@@ -288,7 +75,6 @@ impl<'a, H: Hasher, D: Data, KB: KeyBox> UnitStore<'a, H, D, KB> {
         &self,
         su: &SignedUnit<'a, H, D, KB>,
     ) -> Option<SignedUnit<'a, H, D, KB>> {
-        // TODO: optimize so that unit's hash is computed once only, after it is received
         let hash = su.as_signable().hash();
         if self.contains_hash(&hash) {
             return None;
@@ -313,11 +99,11 @@ impl<'a, H: Hasher, D: Data, KB: KeyBox> UnitStore<'a, H, D, KB> {
         }
         self.is_forker[forker] = true;
         let forkers_units = (0..=self.round_in_progress)
-            .filter_map(|r| self.unit_by_coord((r, forker).into()).cloned())
+            .filter_map(|r| self.unit_by_coord(UnitCoord::new(r, forker)).cloned())
             .collect();
 
         for round in self.round_in_progress + 1..=MAX_ROUND {
-            let coord = (round, forker).into();
+            let coord = UnitCoord::new(round, forker);
             if let Some(su) = self.unit_by_coord(coord).cloned() {
                 // We get rid of this unit. This is safe because it has not been sent to Consensus yet.
                 // The reason we do that, is to be in a "clean" situation where we alert all forker's
@@ -335,7 +121,6 @@ impl<'a, H: Hasher, D: Data, KB: KeyBox> UnitStore<'a, H, D, KB> {
     }
 
     pub(crate) fn add_unit(&mut self, su: SignedUnit<'a, H, D, KB>, alert: bool) {
-        // TODO: optimize so that unit's hash is computed once only, after it is received
         let hash = su.as_signable().hash();
         let round = su.as_signable().round();
         let creator = su.as_signable().creator();

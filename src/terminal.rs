@@ -6,7 +6,7 @@ use crate::{
     extender::ExtenderUnit,
     member::{NotificationIn, NotificationOut},
     nodes::{NodeCount, NodeIndex, NodeMap},
-    units::{ControlHash, Unit},
+    units::{ControlHash, Unit, UnitCoord},
     Hasher, Receiver, RequestAuxData, Round, Sender,
 };
 use log::{debug, error};
@@ -43,7 +43,7 @@ pub struct TerminalUnit<H: Hasher> {
 
 impl<H: Hasher> From<TerminalUnit<H>> for ExtenderUnit<H> {
     fn from(u: TerminalUnit<H>) -> ExtenderUnit<H> {
-        ExtenderUnit::new(u.unit.creator(), u.unit.round(), u.unit.hash, u.parents)
+        ExtenderUnit::new(u.unit.creator(), u.unit.round(), u.unit.hash(), u.parents)
     }
 }
 
@@ -72,7 +72,7 @@ impl<H: Hasher> TerminalUnit<H> {
     }
 
     pub(crate) fn _hash(&self) -> H::Hash {
-        self.unit.hash
+        self.unit.hash()
     }
 
     pub(crate) fn verify_control_hash(&self) -> bool {
@@ -206,7 +206,7 @@ impl<H: Hasher> Terminal<H> {
     }
 
     fn update_on_store_add(&mut self, u: Unit<H>) {
-        let u_hash = u.hash;
+        let u_hash = u.hash();
         let (u_round, pid) = (u.round(), u.creator());
         // If u is a fork, then the below line will overwrite the previous unit at this coord, but this is intended
         // and does not break correctness.
@@ -222,16 +222,15 @@ impl<H: Hasher> Terminal<H> {
                 .push_back(TerminalEvent::ParentsReconstructed(u_hash));
         } else {
             let mut coords_to_request = Vec::new();
-            for (i, b) in u.control_hash().parents.enumerate() {
-                if *b {
-                    let coord = (u_round - 1, i);
-                    let maybe_hash = self.unit_by_coord.get(&coord).cloned();
-                    match maybe_hash {
-                        Some(v_hash) => self.reconstruct_parent(&u_hash, i, &v_hash),
-                        None => {
-                            self.add_coord_trigger(u_round - 1, i, u_hash);
-                            coords_to_request.push((u.round() - 1, i).into());
-                        }
+            for i in u.control_hash().parents() {
+                let coord = (u_round - 1, i);
+                let maybe_hash = self.unit_by_coord.get(&coord).cloned();
+                match maybe_hash {
+                    Some(v_hash) => self.reconstruct_parent(&u_hash, i, &v_hash),
+                    None => {
+                        self.add_coord_trigger(u_round - 1, i, u_hash);
+                        let coord = UnitCoord::new(u.round() - 1, i);
+                        coords_to_request.push(coord);
                     }
                 }
             }
@@ -279,12 +278,8 @@ impl<H: Hasher> Terminal<H> {
             .unit_store
             .get_mut(&u_hash)
             .expect("unit with wrong control hash must be in store");
-        let mut counter = 0;
-        for (i, b) in u.unit.control_hash().parents.enumerate() {
-            if *b {
-                u.parents[i] = Some(p_hashes[counter]);
-                counter += 1;
-            }
+        for (counter, i) in u.unit.control_hash().parents().enumerate() {
+            u.parents[i] = Some(p_hashes[counter]);
         }
         u.n_miss_par_decoded = NodeCount(0);
         self.inspect_parents_in_dag(&u_hash);
