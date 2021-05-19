@@ -130,11 +130,11 @@ impl<H: Hasher> PreUnit<H> {
 ///
 #[derive(Debug, Default, Clone, Encode, Decode)]
 pub(crate) struct FullUnit<H: Hasher, D: Data> {
-    pub(crate) pre_unit: PreUnit<H>,
-    pub(crate) data: D,
-    pub(crate) session_id: SessionId,
+    pre_unit: PreUnit<H>,
+    data: D,
+    session_id: SessionId,
     #[codec(skip)]
-    pub(crate) hash: H::Hash,
+    hash: H::Hash,
 }
 
 impl<H: Hasher, D: Data> FullUnit<H, D> {
@@ -162,6 +162,12 @@ impl<H: Hasher, D: Data> FullUnit<H, D> {
     }
     pub(crate) fn coord(&self) -> UnitCoord {
         self.pre_unit.coord
+    }
+    pub(crate) fn data(&self) -> D {
+        self.data.clone()
+    }
+    pub(crate) fn session_id(&self) -> SessionId {
+        self.session_id
     }
     pub(crate) fn hash(&self) -> H::Hash {
         self.hash

@@ -337,7 +337,7 @@ where
         // TODO: consider moving validation logic for units and alerts to another file, note however
         // that access to the authority list is required for validation.
         let full_unit = su.as_signable();
-        if full_unit.session_id != self.config.session_id {
+        if full_unit.session_id() != self.config.session_id {
             // NOTE: this implies malicious behavior as the unit's session_id
             // is incompatible with session_id of the message it arrived in.
             debug!(target: "rush-member", "A unit with incorrect session_id! {:?}", full_unit);
@@ -710,7 +710,7 @@ where
                     .unit_by_hash(h)
                     .expect("Ordered units must be in store")
                     .as_signable()
-                    .data
+                    .data()
             })
             .collect::<OrderedBatch<D>>();
         if let Err(e) = self.data_io.send_ordered_batch(batch) {
