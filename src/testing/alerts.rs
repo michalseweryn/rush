@@ -248,17 +248,13 @@ impl TestCase {
             }
             while !segment.expected.is_empty() {
                 tokio::select! {
-                    message = messages_from_alerter.next() => {
-                        match message {
+                    message = messages_from_alerter.next() => match message {
                         Some((message, recipient)) => segment.check_output(Outgoing(message, recipient)),
                         None => panic!("Message stream unexpectedly closed."),
-                        }
                     },
-                    notification = notifications_from_alerter.next() => {
-                        match notification {
-                            Some(notification) => segment.check_output(Output::Notification(notification)),
-                            None => panic!("Notification stream unexpectedly closed."),
-                        }
+                    notification = notifications_from_alerter.next() => match notification {
+                        Some(notification) => segment.check_output(Output::Notification(notification)),
+                        None => panic!("Notification stream unexpectedly closed."),
                     }
                 }
                 debug!("Remaining items in this segment: {:?}.", segment.expected);
@@ -271,7 +267,7 @@ impl TestCase {
 
     async fn run(self, run_as: NodeIndex) {
         let keychain = self.keychain(run_as).clone();
-        let mut timeout = Delay::new(Duration::from_millis(1000)).fuse();
+        let mut timeout = Delay::new(Duration::from_millis(500)).fuse();
         futures::select! {
             _ = self.test(keychain).fuse() => {},
             _ = timeout => {
