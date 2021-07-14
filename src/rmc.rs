@@ -227,10 +227,10 @@ impl<'a, H: Signable + Hash + Eq + Clone + Debug, MK: MultiKeychain> ReliableMul
         self.multisigned_hashes_tx
             .unbounded_send(multisigned.clone())
             .expect("Channel should be open");
-        self.scheduler
-            .add_task(Task::BroadcastMessage(Message::MultisignedHash(
-                multisigned.into_unchecked(),
-            )));
+        let task = Task::BroadcastMessage(Message::MultisignedHash(
+            multisigned.into_unchecked()));
+        self.do_task(task.clone());
+        self.scheduler.add_task(task);
     }
 
     fn handle_message(&mut self, message: Message<H, MK::Signature, MK::PartialMultisignature>) {
